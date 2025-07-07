@@ -383,8 +383,15 @@ function App() {
                                     disabled={updatingAll}
                                     className="update-all-button"
                                 >
-                                    {updatingAll ? 'Updating All...' : `Update All (${outdatedPackages.length})`}
+                                    {updatingAll ? (
+                                        <>Updating All... <span className="spinner"></span></>
+                                    ) : (
+                                        `Update All (${outdatedPackages.length})`
+                                    )}
                                 </button>
+                                {updatingAll && (
+                                    <p className="update-progress-tip">Update progress can be viewed in the server terminal.</p>
+                                )}
                                 <div className="package-container">
                                     <div className="package-list full-width">
                                         <h2>Outdated Packages</h2>
@@ -397,9 +404,13 @@ function App() {
                                                     </div>
                                                     <button 
                                                         onClick={() => handleUpdateSingle(pkg)}
-                                                        disabled={updatingSingle === pkg.name}
+                                                        disabled={updatingSingle === pkg.name || updatingAll}
                                                     >
-                                                        {updatingSingle === pkg.name ? 'Updating...' : 'Update'}
+                                                        {updatingSingle === pkg.name ? (
+                                                            <>Updating... <span className="spinner"></span></>
+                                                        ) : (
+                                                            'Update'
+                                                        )}
                                                     </button>
                                                 </li>
                                             ))}

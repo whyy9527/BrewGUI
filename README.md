@@ -9,7 +9,7 @@ This application provides a clean interface to view all your installed Homebrew 
 -   **Categorized View**: Packages are automatically grouped by function (e.g., Image & Graphics, Video & Audio, Development Tools) based on their descriptions.
 -   **Enhanced Search (Installed)**: Quickly find installed packages by searching their name, description, or even their assigned category.
 -   **Install New Packages**: Search the Homebrew repository for new formulae and casks. Results are displayed concisely with a 'Details' button to view full information before installation.
--   **Update Packages**: View all outdated packages and update them individually or all at once with a single click.
+-   **Update Packages**: View all outdated packages and update them individually or all at once with a single click. During updates, buttons are disabled, and visual progress indicators are shown. The backend now handles `brew` command concurrency, preventing conflicts, and provides real-time output of `brew upgrade` processes directly in the server terminal for better visibility.
 -   **Detailed Information**: Click the "Details" button next to any package (installed or search result) to view its full official information from Homebrew in a modal window.
 -   **Uninstall Packages**: Easily uninstall any installed formula or cask directly from the interface.
 -   **Dependency Grouping**: Toggle to group installed packages by whether they are core packages or dependencies of other installed packages, aiding safer uninstallation.

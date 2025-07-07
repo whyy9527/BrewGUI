@@ -1,7 +1,9 @@
 
 const express = require('express');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const cors = require('cors');
+
+let isBrewCommandRunning = false; // Global lock for brew commands
 
 const app = express();
 const port = 3001;
@@ -9,15 +11,80 @@ const port = 3001;
 app.use(cors());
 
 // Helper function to run shell commands
-const runCommand = (command) => {
+const runCommand = (command, isBrewUpgradeCommand = false) => {
     return new Promise((resolve, reject) => {
-        exec(command, { maxBuffer: 1024 * 5000 }, (error, stdout, stderr) => {
-            if (error) {
-                console.error(`exec error: ${error}`);
-                return reject({ error, stderr });
+        const [cmd, ...args] = command.split(' ');
+        const child = spawn(cmd, args, { maxBuffer: 1024 * 5000 });
+
+        let stdoutBuffer = '';
+        let stderrBuffer = '';
+
+        child.stdout.on('data', (data) => {
+            const chunk = data.toString();
+            stdoutBuffer += chunk;
+            if (isBrewUpgradeCommand) {
+                process.stdout.write(chunk); // Real-time output to server terminal
             }
-            resolve(stdout.trim());
         });
+
+        child.stderr.on('data', (data) => {
+            const chunk = data.toString();
+            stderrBuffer += chunk;
+            if (isBrewUpgradeCommand) {
+                process.stderr.write(chunk); // Real-time error output to server terminal
+            }
+        });
+
+        child.on('close', (code) => {
+            if (code !== 0) {
+                reject({ error: `Command exited with code ${code}`, stdout: stdoutBuffer.trim(), stderr: stderrBuffer.trim() });
+            } else {
+                resolve({ stdout: stdoutBuffer.trim(), stderr: stderrBuffer.trim() });
+            }
+        });
+
+        child.on('error', (err) => {
+            reject({ error: `Failed to start command: ${err.message}`, stdout: stdoutBuffer.trim(), stderr: stderrBuffer.trim() });
+        });
+    });
+};
+
+// Function to run brew commands with a lock
+const runBrewCommand = (command) => {
+    return new Promise(async (resolve, reject) => {
+        if (isBrewCommandRunning) {
+            return reject({ error: 'A brew command is already running. Please wait.' });
+        }
+        isBrewCommandRunning = true;
+        try {
+            const isUpgradeCommand = command.startsWith('brew upgrade');
+            const { stdout, stderr } = await runCommand(command, isUpgradeCommand);
+
+            if (isUpgradeCommand) {
+                console.log(`Brew upgrade command finished. Final output:`);
+                if (stdout) {
+                    console.log(`Command stdout:\n${stdout}`);
+                }
+                if (stderr) {
+                    console.error(`Command stderr:\n${stderr}`);
+                }
+            }
+            resolve(stdout);
+        } catch (e) {
+            const isUpgradeCommand = command.startsWith('brew upgrade');
+            if (isUpgradeCommand) {
+                console.error(`Error executing brew upgrade command: ${command}`);
+                if (e.stdout) {
+                    console.log(`Error stdout:\n${e.stdout}`);
+                }
+                if (e.stderr) {
+                    console.error(`Error stderr:\n${e.stderr}`);
+                }
+            }
+            reject(e);
+        } finally {
+            isBrewCommandRunning = false;
+        }
     });
 };
 
@@ -53,10 +120,10 @@ function assignCategory(description) {
 // Endpoint to get all installed packages with descriptions and categories
 app.get('/api/packages', async (req, res) => {
     try {
-        const jsonOutput = await runCommand('brew info --json=v2 --installed');
+        const { stdout: jsonOutput } = await runCommand('brew info --json=v2 --installed');
         const brewInfo = JSON.parse(jsonOutput);
 
-        const outdatedJson = await runCommand('brew outdated --json');
+        const { stdout: outdatedJson } = await runCommand('brew outdated --json');
         const outdatedInfo = JSON.parse(outdatedJson);
         const outdatedNames = new Set(outdatedInfo.formulae.map(f => f.name).concat(outdatedInfo.casks.map(c => c.name)));
 
@@ -121,9 +188,11 @@ app.get('/api/packages', async (req, res) => {
 // Endpoint to get outdated packages
 app.get('/api/outdated', async (req, res) => {
     try {
-        const outdatedJson = await runCommand('brew outdated --json');
+        const { stdout: outdatedJson } = await runCommand('brew outdated --json');
         const outdatedInfo = JSON.parse(outdatedJson);
-        res.json(outdatedInfo);
+        const formulaeOutdated = outdatedInfo.formulae.map(pkg => ({ ...pkg, type: 'formula' }));
+        const casksOutdated = outdatedInfo.casks.map(pkg => ({ ...pkg, type: 'cask' }));
+        res.json({ formulae: formulaeOutdated, casks: casksOutdated });
     } catch (e) {
         console.error("Error fetching outdated packages:", e);
         res.status(500).json({ error: 'Failed to get outdated packages.', details: e });
@@ -144,7 +213,7 @@ app.delete('/api/uninstall/:type/:name', async (req, res) => {
     const command = `brew uninstall ${type === 'casks' ? '--cask ' : ''}${name}`;
 
     try {
-        const output = await runCommand(command);
+        const output = await runBrewCommand(command);
         res.json({ success: true, message: `Successfully uninstalled ${name}.`, output });
     } catch (e) {
         res.status(500).json({ error: `Failed to uninstall ${name}.`, details: e });
@@ -213,7 +282,7 @@ app.post('/api/install/:type/:name', async (req, res) => {
     const command = `brew install ${type === 'casks' ? '--cask ' : ''}${name}`;
 
     try {
-        const output = await runCommand(command);
+        const output = await runBrewCommand(command);
         res.json({ success: true, message: `Successfully installed ${name}.`, output });
     } catch (e) {
         res.status(500).json({ error: `Failed to install ${name}.`, details: e });
@@ -223,7 +292,7 @@ app.post('/api/install/:type/:name', async (req, res) => {
 // Endpoint to update all outdated packages
 app.post('/api/update-all', async (req, res) => {
     try {
-        const output = await runCommand('brew upgrade');
+        const output = await runBrewCommand('brew upgrade');
         res.json({ success: true, message: 'Successfully updated all outdated packages.', output });
     } catch (e) {
         res.status(500).json({ error: 'Failed to update all packages.', details: e });
@@ -244,7 +313,7 @@ app.post('/api/update/:type/:name', async (req, res) => {
     const command = `brew upgrade ${type === 'casks' ? '--cask ' : ''}${name}`;
 
     try {
-        const output = await runCommand(command);
+        const output = await runBrewCommand(command);
         res.json({ success: true, message: `Successfully updated ${name}.`, output });
     } catch (e) {
         res.status(500).json({ error: `Failed to update ${name}.`, details: e });
