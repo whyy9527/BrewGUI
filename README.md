@@ -22,14 +22,14 @@ This application provides a clean interface to view all your installed Homebrew 
 
 2. **Register the `brewgui` alias and install dependencies.**
 
-    Open your terminal, navigate to the `BrewGUI` project root directory (where this `README.md` file is located), and run the setup script:
+    Open your terminal, navigate to the `BrewGUI` project root directory (the directory where you cloned or downloaded this project, containing `README.md`, `server`, and `client` folders), and run the setup script:
 
     ```bash
     ./register_alias.sh
     ```
 
     This script will:
-    - Add or update the `brewgui` alias in your `~/.zshrc` file.
+    - Add or update the `brewgui` alias in your `~/.zshrc` file, pointing to the correct project location.
     - Automatically install all necessary Node.js dependencies for both the server and client parts of the application.
 
     After running the script, you might need to reload your shell configuration for the alias to take effect:
