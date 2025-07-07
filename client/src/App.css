@@ -138,14 +138,22 @@ main {
     font-size: 1rem;
 }
 
-.group-letter {
-    background-color: #e9ecef;
-    padding: 5px 10px;
-    margin: 1rem 0 0.5rem 0;
-    border-radius: 4px;
-    text-align: center;
-    font-size: 1.2rem;
-    color: #495057;
+.filter-button {
+    background-color: #28a745;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    padding: 10px 15px;
+    margin-left: 10px;
+    margin-top: 15px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: background-color 0.2s ease-in-out;
+    height: 40.5px;
+}
+
+.filter-button:hover {
+    background-color: #218838;
 }
 
 .group-category {

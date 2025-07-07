@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import './App.css';
@@ -9,6 +8,7 @@ interface Package {
     name: string;
     desc: string;
     category: string;
+    isDependent: boolean;
 }
 
 interface Packages {
@@ -37,6 +37,7 @@ function App() {
     const [uninstalling, setUninstalling] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [modalContent, setModalContent] = useState<string | null>(null);
+    const [filterByDependency, setFilterByDependency] = useState<boolean>(false);
 
     const fetchPackages = async () => {
         setLoading(true);
@@ -88,21 +89,38 @@ function App() {
         return { formulae: filter(packages.formulae), casks: filter(packages.casks) };
     }, [searchTerm, packages]);
 
-    const groupedPackages = (pkgs: Package[]): GroupedPackages => 
-        pkgs.reduce((acc, pkg) => {
-            const category = pkg.category || 'Uncategorized'; // Fallback for safety
-            if (!acc[category]) acc[category] = [];
-            acc[category].push(pkg);
-            return acc;
-        }, {} as GroupedPackages);
+    const groupedPackages = (pkgs: Package[]): GroupedPackages => {
+        if (filterByDependency) {
+            const dependent: Package[] = [];
+            const core: Package[] = [];
+            pkgs.forEach(pkg => {
+                if (pkg.isDependent) {
+                    dependent.push(pkg);
+                } else {
+                    core.push(pkg);
+                }
+            });
+            return {
+                'Core Packages': core.sort((a, b) => a.name.localeCompare(b.name)),
+                'Dependent Packages': dependent.sort((a, b) => a.name.localeCompare(b.name)),
+            };
+        } else {
+            return pkgs.reduce((acc, pkg) => {
+                const category = pkg.category || 'Uncategorized';
+                if (!acc[category]) acc[category] = [];
+                acc[category].push(pkg);
+                return acc;
+            }, {} as GroupedPackages);
+        }
+    };
 
     const renderPackageList = (pkgs: Package[], type: 'formulae' | 'casks') => {
         const grouped = groupedPackages(pkgs);
-        return Object.keys(grouped).sort().map(category => (
-            <div key={category}>
-                <h3 className="group-category">{category}</h3>
+        return Object.keys(grouped).sort().map(groupName => (
+            <div key={groupName}>
+                <h3 className="group-category">{groupName}</h3>
                 <ul>
-                    {grouped[category].map(pkg => (
+                    {grouped[groupName].map(pkg => (
                         <li key={pkg.name}>
                             <div className="package-info">
                                 <span className="package-name">{pkg.name}</span>
@@ -137,6 +155,12 @@ function App() {
                     className="search-bar"
                     onChange={e => setSearchTerm(e.target.value)}
                 />
+                <button 
+                    onClick={() => setFilterByDependency(!filterByDependency)}
+                    className="filter-button"
+                >
+                    {filterByDependency ? 'Show by Category' : 'Group by Dependency'}
+                </button>
             </header>
             <main>
                 {loading && <p>Loading packages...</p>}

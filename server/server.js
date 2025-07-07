@@ -1,4 +1,3 @@
-
 const express = require('express');
 const { exec } = require('child_process');
 const cors = require('cors');
@@ -56,16 +55,53 @@ app.get('/api/packages', async (req, res) => {
         const jsonOutput = await runCommand('brew info --json=v2 --installed');
         const brewInfo = JSON.parse(jsonOutput);
 
+        const allInstalledNames = new Set();
+        brewInfo.formulae.forEach(pkg => allInstalledNames.add(pkg.name));
+        brewInfo.casks.forEach(pkg => allInstalledNames.add(pkg.token));
+
+        const dependentPackages = new Set();
+
+        // Identify formulae that are dependencies of other installed formulae
+        brewInfo.formulae.forEach(pkg => {
+            if (pkg.dependencies) {
+                pkg.dependencies.forEach(dep => {
+                    if (allInstalledNames.has(dep)) {
+                        dependentPackages.add(dep);
+                    }
+                });
+            }
+        });
+
+        // Identify casks that are dependencies of other installed casks (less common, but possible)
+        brewInfo.casks.forEach(pkg => {
+            if (pkg.depends_on && pkg.depends_on.formula) {
+                pkg.depends_on.formula.forEach(dep => {
+                    if (allInstalledNames.has(dep)) {
+                        dependentPackages.add(dep);
+                    }
+                });
+            }
+            if (pkg.depends_on && pkg.depends_on.cask) {
+                pkg.depends_on.cask.forEach(dep => {
+                    if (allInstalledNames.has(dep)) {
+                        dependentPackages.add(dep);
+                    }
+                });
+            }
+        });
+
         const formulae = brewInfo.formulae.map(pkg => ({
             name: pkg.name,
             desc: pkg.desc || 'No description available.',
-            category: assignCategory(pkg.desc || '')
+            category: assignCategory(pkg.desc || ''),
+            isDependent: dependentPackages.has(pkg.name)
         }));
 
         const casks = brewInfo.casks.map(pkg => ({
             name: pkg.token, // For casks, the command-line name is 'token'
             desc: pkg.desc || 'No description available.',
-            category: assignCategory(pkg.desc || '')
+            category: assignCategory(pkg.desc || ''),
+            isDependent: dependentPackages.has(pkg.token)
         }));
         
         res.json({ formulae, casks });
