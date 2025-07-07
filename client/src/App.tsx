@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import './App.css';
 
@@ -9,6 +9,7 @@ interface Package {
     desc: string;
     category: string;
     isDependent: boolean;
+    isOutdated?: boolean; // Added for update feature
 }
 
 interface Packages {
@@ -16,8 +17,21 @@ interface Packages {
     casks: Package[];
 }
 
+interface OutdatedPackage {
+    name: string;
+    current_version: string;
+    installed_versions: string[];
+    latest_version: string;
+    type: 'formula' | 'cask';
+}
+
 interface GroupedPackages {
     [key: string]: Package[];
+}
+
+interface SearchResultNames {
+    formulae: string[];
+    casks: string[];
 }
 
 // Modal component for showing details
@@ -32,12 +46,24 @@ const Modal = ({ content, onClose }: { content: string; onClose: () => void }) =
 
 function App() {
     const [packages, setPackages] = useState<Packages>({ formulae: [], casks: [] });
+    const [outdatedPackages, setOutdatedPackages] = useState<OutdatedPackage[]>([]);
     const [loading, setLoading] = useState<boolean>(true);
     const [error, setError] = useState<string | null>(null);
     const [uninstalling, setUninstalling] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [modalContent, setModalContent] = useState<string | null>(null);
     const [filterByDependency, setFilterByDependency] = useState<boolean>(false);
+    const [activeTab, setActiveTab] = useState<'installed' | 'install' | 'updates'>('installed');
+
+    // For Install Tab
+    const [installSearchTerm, setInstallSearchTerm] = useState('');
+    const [searchResults, setSearchResults] = useState<SearchResultNames | null>(null);
+    const [searching, setSearching] = useState<boolean>(false);
+    const [installing, setInstalling] = useState<string | null>(null);
+
+    // For Updates Tab
+    const [updatingAll, setUpdatingAll] = useState<boolean>(false);
+    const [updatingSingle, setUpdatingSingle] = useState<string | null>(null);
 
     const fetchPackages = async () => {
         setLoading(true);
@@ -52,8 +78,19 @@ function App() {
         setLoading(false);
     };
 
+    const fetchOutdatedPackages = async () => {
+        try {
+            const response = await axios.get<{ formulae: OutdatedPackage[]; casks: OutdatedPackage[] }>(`${API_BASE_URL}/outdated`);
+            setOutdatedPackages([...response.data.formulae, ...response.data.casks]);
+        } catch (err) {
+            console.error("Failed to fetch outdated packages:", err);
+            setOutdatedPackages([]);
+        }
+    };
+
     useEffect(() => {
         fetchPackages();
+        fetchOutdatedPackages();
     }, []);
 
     const handleUninstall = async (type: 'formulae' | 'casks', name: string) => {
@@ -62,6 +99,7 @@ function App() {
         try {
             await axios.delete(`${API_BASE_URL}/uninstall/${type}/${name}`);
             fetchPackages();
+            fetchOutdatedPackages(); // Refresh outdated list as well
         } catch (err) {
             alert(`Failed to uninstall ${name}.`);
             console.error(err);
@@ -123,7 +161,7 @@ function App() {
                     {grouped[groupName].map(pkg => (
                         <li key={pkg.name}>
                             <div className="package-info">
-                                <span className="package-name">{pkg.name}</span>
+                                <span className="package-name">{pkg.name} {pkg.isOutdated && <span className="outdated-tag">Outdated</span>}</span>
                                 <p className="package-desc">{pkg.desc}</p>
                             </div>
                             <div className="package-actions">
@@ -143,38 +181,235 @@ function App() {
         ));
     };
 
+    const searchForInstallPackages = useCallback(async () => {
+        if (!installSearchTerm) {
+            setSearchResults(null);
+            setSearching(false);
+            return;
+        }
+        setSearching(true);
+        try {
+            const response = await axios.get<SearchResultNames>(`${API_BASE_URL}/search?query=${installSearchTerm}`);
+            setSearchResults(response.data);
+        } catch (err) {
+            alert('Failed to search packages.');
+            console.error(err);
+        }
+        setSearching(false);
+    }, [installSearchTerm]);
+
+    // Debounce search input
+    useEffect(() => {
+        const handler = setTimeout(() => {
+            searchForInstallPackages();
+        }, 500); // 500ms debounce time
+
+        return () => {
+            clearTimeout(handler);
+        };
+    }, [installSearchTerm, searchForInstallPackages]);
+
+    const handleInstall = async (type: 'formulae' | 'casks', name: string) => {
+        if (!window.confirm(`Are you sure you want to install ${name}?`)) return;
+        setInstalling(name);
+        try {
+            await axios.post(`${API_BASE_URL}/install/${type}/${name}`);
+            alert(`Successfully installed ${name}.`);
+            fetchPackages(); // Refresh installed packages list
+            setSearchResults(null); // Clear search results
+            setInstallSearchTerm(''); // Clear search term
+            setActiveTab('installed'); // Switch back to installed tab
+        } catch (err) {
+            alert(`Failed to install ${name}.`);
+            console.error(err);
+        }
+        setInstalling(null);
+    };
+
+    const handleUpdateAll = async () => {
+        if (!window.confirm('Are you sure you want to update all outdated packages?')) return;
+        setUpdatingAll(true);
+        try {
+            await axios.post(`${API_BASE_URL}/update-all`);
+            alert('All outdated packages updated successfully!');
+            fetchPackages();
+            fetchOutdatedPackages();
+        } catch (err) {
+            alert('Failed to update all packages.');
+            console.error(err);
+        }
+        setUpdatingAll(false);
+    };
+
+    const handleUpdateSingle = async (pkg: OutdatedPackage) => {
+        if (!window.confirm(`Are you sure you want to update ${pkg.name}?`)) return;
+        setUpdatingSingle(pkg.name);
+        try {
+            await axios.post(`${API_BASE_URL}/update/${pkg.type === 'formula' ? 'formulae' : 'casks'}/${pkg.name}`);
+            alert(`Successfully updated ${pkg.name}.`);
+            fetchPackages();
+            fetchOutdatedPackages();
+        } catch (err) {
+            alert(`Failed to update ${pkg.name}.`);
+            console.error(err);
+        }
+        setUpdatingSingle(null);
+    };
+
     return (
         <div className="App">
             {modalContent && <Modal content={modalContent} onClose={() => setModalContent(null)} />}
             <header className="App-header">
                 <h1>BrewGUI</h1>
                 <p>A simple web interface for Homebrew</p>
-                <input 
-                    type="text" 
-                    placeholder="Search by name, description, or category..." 
-                    className="search-bar"
-                    onChange={e => setSearchTerm(e.target.value)}
-                />
-                <button 
-                    onClick={() => setFilterByDependency(!filterByDependency)}
-                    className="filter-button"
-                >
-                    {filterByDependency ? 'Show by Category' : 'Group by Dependency'}
-                </button>
+                <div className="tabs">
+                    <button 
+                        className={activeTab === 'installed' ? 'active' : ''}
+                        onClick={() => setActiveTab('installed')}
+                    >
+                        Installed Packages
+                    </button>
+                    <button 
+                        className={activeTab === 'install' ? 'active' : ''}
+                        onClick={() => setActiveTab('install')}
+                    >
+                        Install New Package
+                    </button>
+                    <button 
+                        className={activeTab === 'updates' ? 'active' : ''}
+                        onClick={() => {
+                            setActiveTab('updates');
+                            fetchOutdatedPackages(); // Refresh when tab is clicked
+                        }}
+                    >
+                        Updates ({outdatedPackages.length})
+                    </button>
+                </div>
             </header>
             <main>
-                {loading && <p>Loading packages...</p>}
-                {error && <p className="error">{error}</p>}
-                {!loading && !error && (
-                    <div className="package-container">
-                        <div className="package-list">
-                            <h2>Formulae ({filteredPackages.formulae.length})</h2>
-                            {renderPackageList(filteredPackages.formulae, 'formulae')}
+                {activeTab === 'installed' && (
+                    <>
+                        <div className="filter-controls">
+                            <input 
+                                type="text" 
+                                placeholder="Search by name, description, or category..." 
+                                className="search-bar"
+                                onChange={e => setSearchTerm(e.target.value)}
+                            />
+                            <button 
+                                onClick={() => setFilterByDependency(!filterByDependency)}
+                                className="filter-button"
+                            >
+                                {filterByDependency ? 'Show by Category' : 'Group by Dependency'}
+                            </button>
                         </div>
-                        <div className="package-list">
-                            <h2>Casks ({filteredPackages.casks.length})</h2>
-                            {renderPackageList(filteredPackages.casks, 'casks')}
+                        {loading && <p>Loading packages...</p>}
+                        {error && <p className="error">{error}</p>}
+                        {!loading && !error && (
+                            <div className="package-container">
+                                <div className="package-list">
+                                    <h2>Formulae ({filteredPackages.formulae.length})</h2>
+                                    {renderPackageList(filteredPackages.formulae, 'formulae')}
+                                </div>
+                                <div className="package-list">
+                                    <h2>Casks ({filteredPackages.casks.length})</h2>
+                                    {renderPackageList(filteredPackages.casks, 'casks')}
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
+                {activeTab === 'install' && (
+                    <div className="install-tab-content">
+                        <div className="search-install-bar">
+                            <input 
+                                type="text" 
+                                placeholder="Search for packages to install..." 
+                                value={installSearchTerm}
+                                onChange={e => setInstallSearchTerm(e.target.value)}
+                            />
                         </div>
+                        {searching && <p>Searching...</p>}
+                        {searchResults && (searchResults.formulae.length > 0 || searchResults.casks.length > 0) ? (
+                            <div className="search-results-container package-container">
+                                <div className="package-list">
+                                    <h2>Formulae ({searchResults.formulae.length})</h2>
+                                    <ul>
+                                        {searchResults.formulae.map(pkgName => (
+                                            <li key={pkgName}>
+                                                <span>{pkgName}</span>
+                                                <div className="package-actions">
+                                                    <button onClick={() => handleShowInfo('formulae', pkgName)}>Details</button>
+                                                    <button 
+                                                        onClick={() => handleInstall('formulae', pkgName)}
+                                                        disabled={installing === pkgName}
+                                                    >
+                                                        {installing === pkgName ? 'Installing...' : 'Install'}
+                                                    </button>
+                                                </div>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                                <div className="package-list">
+                                    <h2>Casks ({searchResults.casks.length})</h2>
+                                    <ul>
+                                        {searchResults.casks.map(pkgName => (
+                                            <li key={pkgName}>
+                                                <span>{pkgName}</span>
+                                                <div className="package-actions">
+                                                    <button onClick={() => handleShowInfo('casks', pkgName)}>Details</button>
+                                                    <button 
+                                                        onClick={() => handleInstall('casks', pkgName)}
+                                                        disabled={installing === pkgName}
+                                                    >
+                                                        {installing === pkgName ? 'Installing...' : 'Install'}
+                                                    </button>
+                                                </div>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            </div>
+                        ) : (installSearchTerm && !searching && <p>No results found.</p>)}
+                    </div>
+                )}
+                {activeTab === 'updates' && (
+                    <div className="updates-tab-content">
+                        {outdatedPackages.length > 0 ? (
+                            <>
+                                <button 
+                                    onClick={handleUpdateAll}
+                                    disabled={updatingAll}
+                                    className="update-all-button"
+                                >
+                                    {updatingAll ? 'Updating All...' : `Update All (${outdatedPackages.length})`}
+                                </button>
+                                <div className="package-container">
+                                    <div className="package-list full-width">
+                                        <h2>Outdated Packages</h2>
+                                        <ul>
+                                            {outdatedPackages.map(pkg => (
+                                                <li key={pkg.name}>
+                                                    <div className="package-info">
+                                                        <span className="package-name">{pkg.name}</span>
+                                                        <p className="package-desc">{pkg.current_version} &rarr; {pkg.latest_version}</p>
+                                                    </div>
+                                                    <button 
+                                                        onClick={() => handleUpdateSingle(pkg)}
+                                                        disabled={updatingSingle === pkg.name}
+                                                    >
+                                                        {updatingSingle === pkg.name ? 'Updating...' : 'Update'}
+                                                    </button>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                </div>
+                            </>
+                        ) : (
+                            <p>All packages are up to date!</p>
+                        )}
                     </div>
                 )}
             </main>

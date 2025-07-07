@@ -1,3 +1,4 @@
+
 const express = require('express');
 const { exec } = require('child_process');
 const cors = require('cors');
@@ -55,6 +56,10 @@ app.get('/api/packages', async (req, res) => {
         const jsonOutput = await runCommand('brew info --json=v2 --installed');
         const brewInfo = JSON.parse(jsonOutput);
 
+        const outdatedJson = await runCommand('brew outdated --json');
+        const outdatedInfo = JSON.parse(outdatedJson);
+        const outdatedNames = new Set(outdatedInfo.formulae.map(f => f.name).concat(outdatedInfo.casks.map(c => c.name)));
+
         const allInstalledNames = new Set();
         brewInfo.formulae.forEach(pkg => allInstalledNames.add(pkg.name));
         brewInfo.casks.forEach(pkg => allInstalledNames.add(pkg.token));
@@ -94,20 +99,34 @@ app.get('/api/packages', async (req, res) => {
             name: pkg.name,
             desc: pkg.desc || 'No description available.',
             category: assignCategory(pkg.desc || ''),
-            isDependent: dependentPackages.has(pkg.name)
+            isDependent: dependentPackages.has(pkg.name),
+            isOutdated: outdatedNames.has(pkg.name)
         }));
 
         const casks = brewInfo.casks.map(pkg => ({
             name: pkg.token, // For casks, the command-line name is 'token'
             desc: pkg.desc || 'No description available.',
             category: assignCategory(pkg.desc || ''),
-            isDependent: dependentPackages.has(pkg.token)
+            isDependent: dependentPackages.has(pkg.token),
+            isOutdated: outdatedNames.has(pkg.token)
         }));
         
         res.json({ formulae, casks });
     } catch (e) {
         console.error("Error fetching package info:", e);
         res.status(500).json({ error: 'Failed to get package lists.', details: e });
+    }
+});
+
+// Endpoint to get outdated packages
+app.get('/api/outdated', async (req, res) => {
+    try {
+        const outdatedJson = await runCommand('brew outdated --json');
+        const outdatedInfo = JSON.parse(outdatedJson);
+        res.json(outdatedInfo);
+    } catch (e) {
+        console.error("Error fetching outdated packages:", e);
+        res.status(500).json({ error: 'Failed to get outdated packages.', details: e });
     }
 });
 
@@ -150,6 +169,85 @@ app.get('/api/info/:type/:name', async (req, res) => {
         res.json({ info: output });
     } catch (e) {
         res.status(500).json({ error: `Failed to get info for ${name}.`, details: e });
+    }
+});
+
+// Endpoint to search for packages (returns names only)
+app.get('/api/search', async (req, res) => {
+    const { query } = req.query;
+    if (!query) {
+        return res.status(400).json({ error: 'Search query is required.' });
+    }
+
+    // Basic validation to prevent command injection
+    if (!/^[a-zA-Z0-9@._\s-]+$/.test(query)) {
+        return res.status(400).json({ error: 'Invalid search query.' });
+    }
+
+    try {
+        // Search for both formulae and casks to get names
+        const formulaeSearchOutput = await runCommand(`brew search --formulae ${query}`);
+        const casksSearchOutput = await runCommand(`brew search --casks ${query}`);
+
+        const formulaeNames = formulaeSearchOutput.split(/\s+/).filter(Boolean);
+        const casksNames = casksSearchOutput.split(/\s+/).filter(Boolean);
+
+        res.json({ formulae: formulaeNames, casks: casksNames });
+    } catch (e) {
+        console.error("Error searching packages:", e);
+        res.status(500).json({ error: 'Failed to search packages.', details: e });
+    }
+});
+
+// Endpoint to install a package
+app.post('/api/install/:type/:name', async (req, res) => {
+    const { type, name } = req.params;
+    if (type !== 'formulae' && type !== 'casks') {
+        return res.status(400).json({ error: 'Invalid package type.' });
+    }
+
+    if (!/^[a-zA-Z0-9@._-]+$/.test(name)) {
+        return res.status(400).json({ error: 'Invalid package name.' });
+    }
+
+    const command = `brew install ${type === 'casks' ? '--cask ' : ''}${name}`;
+
+    try {
+        const output = await runCommand(command);
+        res.json({ success: true, message: `Successfully installed ${name}.`, output });
+    } catch (e) {
+        res.status(500).json({ error: `Failed to install ${name}.`, details: e });
+    }
+});
+
+// Endpoint to update all outdated packages
+app.post('/api/update-all', async (req, res) => {
+    try {
+        const output = await runCommand('brew upgrade');
+        res.json({ success: true, message: 'Successfully updated all outdated packages.', output });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to update all packages.', details: e });
+    }
+});
+
+// Endpoint to update a specific package
+app.post('/api/update/:type/:name', async (req, res) => {
+    const { type, name } = req.params;
+    if (type !== 'formulae' && type !== 'casks') {
+        return res.status(400).json({ error: 'Invalid package type.' });
+    }
+
+    if (!/^[a-zA-Z0-9@._-]+$/.test(name)) {
+        return res.status(400).json({ error: 'Invalid package name.' });
+    }
+
+    const command = `brew upgrade ${type === 'casks' ? '--cask ' : ''}${name}`;
+
+    try {
+        const output = await runCommand(command);
+        res.json({ success: true, message: `Successfully updated ${name}.`, output });
+    } catch (e) {
+        res.status(500).json({ error: `Failed to update ${name}.`, details: e });
     }
 });
 
