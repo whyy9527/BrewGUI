@@ -2,8 +2,15 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import App from './App';
 
-test('renders learn react link', () => {
+// Mock axios to avoid ES module issues in test environment
+jest.mock('axios', () => ({
+  get: jest.fn(() => Promise.resolve({ data: { formulae: [], casks: [] } })),
+  post: jest.fn(() => Promise.resolve({ data: {} })),
+  delete: jest.fn(() => Promise.resolve({ data: {} })),
+}));
+
+test('renders BrewGUI header', () => {
   render(<App />);
-  const linkElement = screen.getByText(/learn react/i);
-  expect(linkElement).toBeInTheDocument();
+  const headerElement = screen.getByText(/BrewGUI/i);
+  expect(headerElement).toBeInTheDocument();
 });

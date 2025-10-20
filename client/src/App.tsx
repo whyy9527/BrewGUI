@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import './App.css';
 
-const API_BASE_URL = 'http://localhost:3001/api';
+const API_BASE_URL = '/api';
 
 interface Package {
     name: string;
@@ -68,12 +68,17 @@ function App() {
     const fetchPackages = async () => {
         setLoading(true);
         try {
+            console.log('Fetching packages from:', `${API_BASE_URL}/packages`);
             const response = await axios.get<Packages>(`${API_BASE_URL}/packages`);
+            console.log('Packages fetched successfully:', response.data);
             setPackages(response.data);
             setError(null);
         } catch (err) {
+            console.error('Failed to fetch packages:', err);
+            if (err instanceof Error) {
+                console.error('Error details:', err.message);
+            }
             setError('Failed to fetch packages. Is the server running?');
-            console.error(err);
         }
         setLoading(false);
     };
@@ -81,6 +86,7 @@ function App() {
     const fetchOutdatedPackages = async () => {
         try {
             const response = await axios.get<{ formulae: OutdatedPackage[]; casks: OutdatedPackage[] }>(`${API_BASE_URL}/outdated`);
+            console.log('Outdated packages fetched:', response.data);
             setOutdatedPackages([...response.data.formulae, ...response.data.casks]);
         } catch (err) {
             console.error("Failed to fetch outdated packages:", err);
@@ -118,20 +124,24 @@ function App() {
     };
 
     const filteredPackages = useMemo(() => {
-        const filter = (pkgs: Package[]) => 
-            pkgs.filter(pkg => 
-                pkg.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        const filter = (pkgs: Package[] | undefined) =>
+            (pkgs || []).filter(pkg =>
+                pkg.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 pkg.desc.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 pkg.category.toLowerCase().includes(searchTerm.toLowerCase())
             );
-        return { formulae: filter(packages.formulae), casks: filter(packages.casks) };
+        return {
+            formulae: filter(packages.formulae),
+            casks: filter(packages.casks)
+        };
     }, [searchTerm, packages]);
 
-    const groupedPackages = (pkgs: Package[]): GroupedPackages => {
+    const groupedPackages = (pkgs: Package[] | undefined): GroupedPackages => {
+        const packagesToGroup = pkgs || [];
         if (filterByDependency) {
             const dependent: Package[] = [];
             const core: Package[] = [];
-            pkgs.forEach(pkg => {
+            packagesToGroup.forEach(pkg => {
                 if (pkg.isDependent) {
                     dependent.push(pkg);
                 } else {
@@ -143,7 +153,7 @@ function App() {
                 'Dependent Packages': dependent.sort((a, b) => a.name.localeCompare(b.name)),
             };
         } else {
-            return pkgs.reduce((acc, pkg) => {
+            return packagesToGroup.reduce((acc, pkg) => {
                 const category = pkg.category || 'Uncategorized';
                 if (!acc[category]) acc[category] = [];
                 acc[category].push(pkg);
@@ -152,13 +162,13 @@ function App() {
         }
     };
 
-    const renderPackageList = (pkgs: Package[], type: 'formulae' | 'casks') => {
+    const renderPackageList = (pkgs: Package[] | undefined, type: 'formulae' | 'casks') => {
         const grouped = groupedPackages(pkgs);
         return Object.keys(grouped).sort().map(groupName => (
             <div key={groupName}>
                 <h3 className="group-category">{groupName}</h3>
                 <ul>
-                    {grouped[groupName].map(pkg => (
+                    {(grouped[groupName] || []).map(pkg => (
                         <li key={pkg.name}>
                             <div className="package-info">
                                 <span className="package-name">{pkg.name} {pkg.isOutdated && <span className="outdated-tag">Outdated</span>}</span>
